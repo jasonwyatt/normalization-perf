@@ -32,4 +32,9 @@ class SelectByStorageKeyTest : BaseSchemaTest() {
     fun testSelections_normalized() {
         benchmarkSelection(normalizedHelper, "normalized")
     }
+
+    @Test
+    fun testSelections_normalizedLess() {
+        benchmarkSelection(normalizedLessHelper, "normalized_less")
+    }
 }

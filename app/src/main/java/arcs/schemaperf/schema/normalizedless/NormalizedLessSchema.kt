@@ -1,4 +1,4 @@
-package arcs.schemaperf.schema.normalized
+package arcs.schemaperf.schema.normalizedless
 
 import android.database.sqlite.SQLiteDatabase
 import arcs.schemaperf.model.Person
@@ -6,7 +6,7 @@ import arcs.schemaperf.model.StorageKey
 import arcs.schemaperf.model.createStorageKey
 import arcs.schemaperf.schema.Schema
 
-class NormalizedSchema : Schema {
+class NormalizedLessSchema : Schema {
     override fun createTables(db: SQLiteDatabase) {
         CREATE_TABLES.forEach { db.execSQL(it) }
     }
@@ -41,20 +41,6 @@ class NormalizedSchema : Schema {
                     bindLong(2, personTypeId)
                 }.executeInsert()
 
-            val collectionStorageKeyId = db.maybeInsertStorageKey(createStorageKey())
-            db.compileStatement(INSERT_FRIENDS_COLLECTION)
-                .apply {
-                    bindLong(1, collectionStorageKeyId)
-                    bindLong(2, personTypeId)
-                }.executeInsert()
-
-            val friendInsertStatement = db.compileStatement(INSERT_FRIEND_INTO_COLLECTION)
-            person.friends.forEach {
-                friendInsertStatement.bindLong(1, collectionStorageKeyId)
-                friendInsertStatement.bindLong(2, db.maybeInsertStorageKey(it))
-                friendInsertStatement.executeInsert()
-            }
-
             // Assume we already know the field ids, since we could pre-load those in the drivers.
             val firstNameFieldId = 1L
             val lastNameFieldId = 2L
@@ -62,40 +48,35 @@ class NormalizedSchema : Schema {
             val hometownFieldId = 4L
             val friendsFieldId = 5L
 
-            val firstNameValueId = db.maybeInsertText(person.firstName)
-            val lastNameValueId = db.maybeInsertText(person.lastName)
-            val ageValueId = db.maybeInsertInt(person.age)
-            val hometownValueId = db.maybeInsertText(person.hometown)
-
             val fieldStatement = db.compileStatement(INSERT_PERSON_FIELD_VALUE)
             fieldStatement.bindLong(1, storageKeyId)
             fieldStatement.bindLong(2, firstNameFieldId)
             fieldStatement.bindLong(3, stringTypeId)
-            fieldStatement.bindLong(4, firstNameValueId)
+            fieldStatement.bindString(4, person.firstName)
             fieldStatement.executeInsert()
 
             fieldStatement.bindLong(1, storageKeyId)
             fieldStatement.bindLong(2, lastNameFieldId)
             fieldStatement.bindLong(3, stringTypeId)
-            fieldStatement.bindLong(4, lastNameValueId)
+            fieldStatement.bindString(4, person.lastName)
             fieldStatement.executeInsert()
 
             fieldStatement.bindLong(1, storageKeyId)
             fieldStatement.bindLong(2, ageFieldId)
             fieldStatement.bindLong(3, numberTypeId)
-            fieldStatement.bindLong(4, ageValueId)
+            fieldStatement.bindLong(4, person.age.toLong())
             fieldStatement.executeInsert()
 
             fieldStatement.bindLong(1, storageKeyId)
             fieldStatement.bindLong(2, hometownFieldId)
             fieldStatement.bindLong(3, stringTypeId)
-            fieldStatement.bindLong(4, hometownValueId)
+            fieldStatement.bindString(4, person.hometown)
             fieldStatement.executeInsert()
 
             fieldStatement.bindLong(1, storageKeyId)
             fieldStatement.bindLong(2, friendsFieldId)
             fieldStatement.bindLong(3, collectionTypeId)
-            fieldStatement.bindLong(4, collectionStorageKeyId)
+            fieldStatement.bindString(4, person.friends.joinToString(","))
             fieldStatement.executeInsert()
 
             db.setTransactionSuccessful()
@@ -118,61 +99,20 @@ class NormalizedSchema : Schema {
             .simpleQueryForLong().also { storageKeyIds[storageKey] = it }
     }
 
-    private fun SQLiteDatabase.maybeInsertInt(number: Int): Long {
-        val keyId = compileStatement(INSERT_NUMBER)
-            .apply { bindLong(1, number.toLong()) }
-            .executeInsert()
-        if (keyId >= 0) return keyId
-        return compileStatement(SELECT_NUMBER_ID)
-            .apply { bindLong(1, number.toLong()) }
-            .simpleQueryForLong()
-    }
-
-    private fun SQLiteDatabase.maybeInsertText(text: String): Long {
-        val keyId = compileStatement(INSERT_TEXT)
-            .apply { bindString(1, text) }
-            .executeInsert()
-        if (keyId >= 0) return keyId
-        return compileStatement(SELECT_TEXT_ID)
-            .apply { bindString(1, text) }
-            .simpleQueryForLong()
-    }
-
-    private val params = arrayOf("")
     override fun findPerson(db: SQLiteDatabase, storageKey: StorageKey): Person? {
-        params[0] = storageKey
-        try {
-            db.beginTransaction()
-            val storageKeyId = db.maybeInsertStorageKey(storageKey)
-            val (person, friends, friendsCollectionId) = db.rawQuery(
-                SELECT_PERSON_FIELDS + storageKeyId, null
-            ).use {
-                if (!it.moveToNext()) return null
+        val storageKeyId = db.maybeInsertStorageKey(storageKey)
+        return db.rawQuery(
+            SELECT_PERSON_FIELDS + storageKeyId, null
+        ).use {
+            if (!it.moveToNext()) return null
 
-                val friends = mutableListOf<StorageKey>()
-                Triple(
-                    Person(
-                        it.getString(0),
-                        it.getString(1),
-                        it.getInt(2),
-                        it.getString(3),
-                        friends
-                    ),
-                    friends,
-                    it.getInt(4)
-                )
-            }
-
-            params[0] = friendsCollectionId.toString()
-            db.rawQuery(SELECT_FRIENDS + friendsCollectionId, null).use {
-                while (it.moveToNext()) {
-                    friends.add(it.getString(0))
-                }
-            }
-            db.setTransactionSuccessful()
-            return person
-        } finally {
-            db.endTransaction()
+            Person(
+                it.getString(0),
+                it.getString(1),
+                it.getInt(2),
+                it.getString(3),
+                it.getString(4).split(",")
+            )
         }
     }
 
@@ -201,75 +141,37 @@ class NormalizedSchema : Schema {
             INSERT INTO field_values (entity_storage_key_id, field_id, type_id, value_id) values (?, ?, ?, ?)
         """.trimIndent()
 
-        private val INSERT_NUMBER = """
-            INSERT OR IGNORE INTO number_primitive_values (value) values (?) 
-        """.trimIndent()
-
-        private val SELECT_NUMBER_ID = """
-            SELECT id FROM number_primitive_values WHERE value = ?;
-        """.trimIndent()
-
-        private val INSERT_TEXT = """
-            INSERT OR IGNORE INTO text_primitive_values (value) values (?) 
-        """.trimIndent()
-
-        private val SELECT_TEXT_ID = """
-            SELECT id FROM text_primitive_values WHERE value = ?;
-        """.trimIndent()
-
         private val SELECT_PERSON_FIELDS = """
             SELECT 
-                first_name_text.value AS first_name,
-                last_name_text.value AS last_name,
-                hometown_text.value AS hometown_name,
-                age_number.value AS age,
-                friends.value_id AS friend_collection_id
+                first_name.value AS first_name,
+                last_name.value AS last_name,
+                hometown.value AS hometown_name,
+                age.value AS age,
+                friends.value AS friend_collection_id
             FROM
                 entities AS e
             LEFT JOIN
-                field_values AS first_name_value 
-                ON first_name_value.entity_storage_key_id = e.storage_key_id 
-                AND first_name_value.field_id = 1
+                field_values AS first_name
+                ON first_name.entity_storage_key_id = e.storage_key_id 
+                AND first_name.field_id = 1
             LEFT JOIN
-                text_primitive_values AS first_name_text 
-                ON first_name_text.id = first_name_value.value_id
+                field_values AS last_name
+                ON last_name.entity_storage_key_id = e.storage_key_id 
+                AND last_name.field_id = 2
             LEFT JOIN
-                field_values AS last_name_value 
-                ON last_name_value.entity_storage_key_id = e.storage_key_id 
-                AND last_name_value.field_id = 2
+                field_values AS age
+                ON age.entity_storage_key_id = e.storage_key_id 
+                AND age.field_id = 3
             LEFT JOIN
-                text_primitive_values AS last_name_text 
-                ON last_name_text.id = last_name_value.value_id
-            LEFT JOIN
-                field_values AS age_value 
-                ON age_value.entity_storage_key_id = e.storage_key_id 
-                AND age_value.field_id = 3
-            LEFT JOIN
-                number_primitive_values AS age_number 
-                ON age_number.id = age_value.value_id
-            LEFT JOIN
-                field_values AS hometown_value 
-                ON hometown_value.entity_storage_key_id = e.storage_key_id 
-                AND hometown_value.field_id = 4
-            LEFT JOIN
-                text_primitive_values AS hometown_text 
-                ON hometown_text.id = hometown_value.value_id
+                field_values AS hometown
+                ON hometown.entity_storage_key_id = e.storage_key_id 
+                AND hometown.field_id = 4
             LEFT JOIN
                 field_values AS friends 
                 ON friends.entity_storage_key_id = e.storage_key_id 
                 AND friends.field_id = 5
             WHERE
                 e.storage_key_id =  
-        """.trimIndent()
-
-        private val SELECT_FRIENDS = """
-            SELECT
-                member_keys.storage_key
-            FROM
-                collection_entries AS ce
-            JOIN
-                storage_keys AS member_keys ON member_keys.id = ce.entity_storage_key_id
-            WHERE ce.collection_storage_key_id =  
         """.trimIndent()
 
         private val CREATE_TABLES = """
@@ -326,26 +228,12 @@ class NormalizedSchema : Schema {
                 entity_storage_key_id INTEGER NOT NULL,
                 field_id INTEGER NOT NULL,
                 type_id INTEGER NOT NULL,
-                value_id INTEGER
+                value TEXT
             );
             
             CREATE INDEX 
-                field_values_by_entity_storage_key 
-            ON field_values (entity_storage_key_id, field_id, value_id);
-
-            CREATE TABLE text_primitive_values (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                value TEXT NOT NULL UNIQUE
-            );
-            
-            CREATE INDEX text_primitive_value_index ON text_primitive_values (value);
-
-            CREATE TABLE number_primitive_values (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                value REAL NOT NULL UNIQUE
-            );
-            
-            CREATE INDEX number_primitive_value_index ON number_primitive_values (value);
+                field_values_index
+            ON field_values (entity_storage_key_id, field_id, value);
         """.trimIndent().split("\n\n")
 
         private val DROP_TABLES = """
@@ -354,8 +242,6 @@ class NormalizedSchema : Schema {
             DROP INDEX IF EXISTS collection_entries_collection_storage_key_index;
             DROP INDEX IF EXISTS field_names_by_parent_type;
             DROP INDEX IF EXISTS field_values_by_entity_storage_key;
-            DROP INDEX IF EXISTS text_primitive_value_index;
-            DROP INDEX IF EXISTS number_primitive_value_index;
             DROP TABLE IF EXISTS types;
             DROP TABLE IF EXISTS storage_keys;
             DROP TABLE IF EXISTS entities;
@@ -363,8 +249,6 @@ class NormalizedSchema : Schema {
             DROP TABLE IF EXISTS collection_entries;
             DROP TABLE IF EXISTS fields;
             DROP TABLE IF EXISTS field_values;
-            DROP TABLE IF EXISTS text_primitive_values;
-            DROP TABLE IF EXISTS number_primitive_values;
         """.trimIndent().split("\n")
     }
 }

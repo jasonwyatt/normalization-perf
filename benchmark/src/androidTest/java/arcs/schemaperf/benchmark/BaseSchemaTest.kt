@@ -31,6 +31,8 @@ abstract class BaseSchemaTest {
         private set
     lateinit var normalizedHelper: DatabaseHelper
         private set
+    lateinit var normalizedLessHelper: DatabaseHelper
+        private set
 
     @Before
     fun setUp() {
@@ -45,6 +47,8 @@ abstract class BaseSchemaTest {
             DatabaseHelper(context, "indexed_blob_proto", IndexedBlobSchema(false))
         normalizedHelper =
             DatabaseHelper(context, "normalized", NormalizedSchema())
+        normalizedLessHelper =
+            DatabaseHelper(context, "normalized_less", NormalizedSchema())
     }
 
     @After
@@ -99,11 +103,12 @@ abstract class BaseSchemaTest {
         log("$name: $count insertions complete")
         var iteration = 0
         val itemsPerSelect = 100
+        log("$name: Size: ${helper.getSize()}")
         benchmarkRule.measureRepeated {
             val keysToUse = runWithTimingDisabled {
                 (0 until itemsPerSelect).map { storageKeys.random() }
             }
-            keysToUse.forEach { helper.findPerson(it).also { runWithTimingDisabled { log("$it") } } }
+            keysToUse.forEach { helper.findPerson(it) }
             iteration++
         }
         log("$name: completed $iteration iterations resulting in (${iteration * itemsPerSelect} selections).")
