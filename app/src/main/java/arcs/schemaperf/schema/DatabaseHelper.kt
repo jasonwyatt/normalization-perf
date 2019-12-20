@@ -39,4 +39,7 @@ class DatabaseHelper(
 
     fun insertPerson(storageKey: StorageKey, person: Person): Long =
         writableDatabase.use { schema.insertPerson(it, storageKey, person) }
+
+    fun findPerson(storageKey: StorageKey): Person? =
+        readableDatabase.use { schema.findPerson(it, storageKey) }
 }

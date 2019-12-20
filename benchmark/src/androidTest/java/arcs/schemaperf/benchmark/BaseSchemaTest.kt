@@ -5,6 +5,7 @@ import androidx.benchmark.junit4.BenchmarkRule
 import androidx.benchmark.junit4.measureRepeated
 import androidx.test.core.app.ApplicationProvider
 import arcs.schemaperf.model.PersonGenerator
+import arcs.schemaperf.model.StorageKey
 import arcs.schemaperf.schema.DatabaseHelper
 import arcs.schemaperf.schema.blob.BlobSchema
 import arcs.schemaperf.schema.indexedblob.IndexedBlobSchema
@@ -85,5 +86,26 @@ abstract class BaseSchemaTest {
         }
         log("$name: completed $iteration iterations resulting in (${iteration * count} entities).")
         log("$name: size: ${helper.getSize()} bytes.")
+    }
+
+    fun benchmarkSelection(helper: DatabaseHelper, name: String) {
+        val random = Random(1337)
+        val personGenerator = PersonGenerator(context, random)
+        val count = 1000
+        helper.reset()
+        val storageKeys = mutableListOf<StorageKey>()
+        log("$name: populating database with $count entities")
+        helper.insertPeople(personGenerator.generate(count).onEach { storageKeys.add(it.first) })
+        log("$name: $count insertions complete")
+        var iteration = 0
+        val itemsPerSelect = 100
+        benchmarkRule.measureRepeated {
+            val keysToUse = runWithTimingDisabled {
+                (0 until itemsPerSelect).map { storageKeys.random() }
+            }
+            keysToUse.forEach { helper.findPerson(it).also { runWithTimingDisabled { log("$it") } } }
+            iteration++
+        }
+        log("$name: completed $iteration iterations resulting in (${iteration * itemsPerSelect} selections).")
     }
 }

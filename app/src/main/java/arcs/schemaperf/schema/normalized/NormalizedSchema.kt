@@ -46,7 +46,7 @@ class NormalizedSchema : Schema {
                 .apply {
                     bindLong(1, collectionStorageKeyId)
                     bindLong(2, personTypeId)
-                }
+                }.executeInsert()
 
             val friendInsertStatement = db.compileStatement(INSERT_FRIEND_INTO_COLLECTION)
             person.friends.forEach {
@@ -105,14 +105,17 @@ class NormalizedSchema : Schema {
         }
     }
 
+    private val storageKeyIds = mutableMapOf<String, Long>()
+
     private fun SQLiteDatabase.maybeInsertStorageKey(storageKey: StorageKey): Long {
+        storageKeyIds[storageKey]?.let { return it }
         val keyId = compileStatement(INSERT_STORAGE_KEY)
             .apply { bindString(1, storageKey) }
             .executeInsert()
         if (keyId >= 0) return keyId
         return compileStatement(SELECT_STORAGE_KEY_ID)
             .apply { bindString(1, storageKey) }
-            .simpleQueryForLong()
+            .simpleQueryForLong().also { storageKeyIds[storageKey] = it }
     }
 
     private fun SQLiteDatabase.maybeInsertInt(number: Int): Long {
@@ -133,6 +136,44 @@ class NormalizedSchema : Schema {
         return compileStatement(SELECT_TEXT_ID)
             .apply { bindString(1, text) }
             .simpleQueryForLong()
+    }
+
+    private val params = arrayOf("")
+    override fun findPerson(db: SQLiteDatabase, storageKey: StorageKey): Person? {
+        params[0] = storageKey
+        try {
+            db.beginTransaction()
+            val storageKeyId = db.maybeInsertStorageKey(storageKey)
+            val (person, friends, friendsCollectionId) = db.rawQuery(
+                SELECT_PERSON_FIELDS + storageKeyId, null
+            ).use {
+                if (!it.moveToNext()) return null
+
+                val friends = mutableListOf<StorageKey>()
+                Triple(
+                    Person(
+                        it.getString(0),
+                        it.getString(1),
+                        it.getInt(2),
+                        it.getString(3),
+                        friends
+                    ),
+                    friends,
+                    it.getInt(4)
+                )
+            }
+
+            params[0] = friendsCollectionId.toString()
+            db.rawQuery(SELECT_FRIENDS + friendsCollectionId, null).use {
+                while (it.moveToNext()) {
+                    friends.add(it.getString(0))
+                }
+            }
+            db.setTransactionSuccessful()
+            return person
+        } finally {
+            db.endTransaction()
+        }
     }
 
     companion object {
@@ -174,6 +215,61 @@ class NormalizedSchema : Schema {
 
         private val SELECT_TEXT_ID = """
             SELECT id FROM text_primitive_values WHERE value = ?;
+        """.trimIndent()
+
+        private val SELECT_PERSON_FIELDS = """
+            SELECT 
+                first_name_text.value AS first_name,
+                last_name_text.value AS last_name,
+                hometown_text.value AS hometown_name,
+                age_number.value AS age,
+                friends.value_id AS friend_collection_id
+            FROM
+                entities AS e
+            LEFT JOIN
+                field_values AS first_name_value 
+                ON first_name_value.entity_storage_key_id = e.storage_key_id 
+                AND first_name_value.field_id = 1
+            LEFT JOIN
+                text_primitive_values AS first_name_text 
+                ON first_name_text.id = first_name_value.value_id
+            LEFT JOIN
+                field_values AS last_name_value 
+                ON last_name_value.entity_storage_key_id = e.storage_key_id 
+                AND last_name_value.field_id = 2
+            LEFT JOIN
+                text_primitive_values AS last_name_text 
+                ON last_name_text.id = last_name_value.value_id
+            LEFT JOIN
+                field_values AS age_value 
+                ON age_value.entity_storage_key_id = e.storage_key_id 
+                AND age_value.field_id = 3
+            LEFT JOIN
+                number_primitive_values AS age_number 
+                ON age_number.id = age_value.value_id
+            LEFT JOIN
+                field_values AS hometown_value 
+                ON first_name_value.entity_storage_key_id = e.storage_key_id 
+                AND hometown_value.field_id = 4
+            LEFT JOIN
+                text_primitive_values AS hometown_text 
+                ON hometown_text.id = hometown_value.value_id
+            LEFT JOIN
+                field_values AS friends 
+                ON friends.entity_storage_key_id = e.storage_key_id 
+                AND friends.field_id = 5
+            WHERE
+                e.storage_key_id =  
+        """.trimIndent()
+
+        private val SELECT_FRIENDS = """
+            SELECT
+                member_keys.storage_key
+            FROM
+                collection_entries AS ce
+            JOIN
+                storage_keys AS member_keys ON member_keys.id = ce.entity_storage_key_id
+            WHERE ce.collection_storage_key_id =  
         """.trimIndent()
 
         private val CREATE_TABLES = """

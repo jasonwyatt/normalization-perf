@@ -2,6 +2,7 @@ package arcs.schemaperf.schema.blob
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.util.Log
 import arcs.schemaperf.model.Person
 import arcs.schemaperf.model.StorageKey
 import arcs.schemaperf.schema.Schema
@@ -58,7 +59,23 @@ class BlobSchema(val useJson: Boolean) : Schema {
         return statement.executeInsert()
     }
 
+    override fun findPerson(db: SQLiteDatabase, storageKey: StorageKey): Person? =
+        db.rawQuery(QUERY_STATEMENT, arrayOf(storageKey)).use {
+            if (!it.moveToNext()) return@use null
+
+            val raw = it.getBlob(0)
+            if (useJson) {
+                jsonSerializer.parse(Person.serializer(), raw.toString(Charsets.UTF_8))
+            } else {
+                protoSerializer.load(Person.serializer(), raw)
+            }
+        }
+
     companion object {
+        private val QUERY_STATEMENT = """
+            SELECT serialized_data FROM arcs_data WHERE storage_key = ?
+        """.trimIndent()
+
         private val CREATE_STATEMENT = """
             CREATE TABLE arcs_data (
                 storage_key TEXT NOT NULL UNIQUE PRIMARY KEY,

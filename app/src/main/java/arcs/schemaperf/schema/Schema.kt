@@ -10,6 +10,7 @@ interface Schema {
     fun dropTables(db: SQLiteDatabase)
     fun insertPeople(db: SQLiteDatabase, sequence: Sequence<Pair<StorageKey, Person>>)
     fun insertPerson(db: SQLiteDatabase, storageKey: StorageKey, person: Person): Long
+    fun findPerson(db: SQLiteDatabase, storageKey: StorageKey): Person?
     fun getSize(context: Context, dbName: String): Long =
         context.dataDir
             .resolve("databases")
